@@ -1,0 +1,490 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Wall Clock</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Sora:wght@200;300;600&display=swap">
+<style>
+  /* Layout: mode switch on top, one centered dial of concentric rings around rolling digits, over a sky that
+     follows the real time of day. Clock mode shows city tiles; stopwatch and timer modes show controls. */
+  :root {
+    color-scheme: dark;
+    --sky-top: #070b1f;
+    --sky-bot: #1a1440;
+    --fg: #f4f6ff;
+    --muted: rgba(244, 246, 255, 0.78);
+    --glass: rgba(255, 255, 255, 0.09);
+    --glass-line: rgba(255, 255, 255, 0.22);
+    --accent: #ffc46b;
+    --ring: #ffffff;
+    --track: rgba(255, 255, 255, 0.14);
+    --font-display: "Sora", system-ui, sans-serif;
+    --font-body: "Inter", system-ui, sans-serif;
+  }
+  html { background: var(--sky-top); }
+  body {
+    min-height: 100%;
+    background: linear-gradient(180deg, var(--sky-top), var(--sky-bot)) fixed;
+    color: var(--fg);
+    font-family: var(--font-body);
+    padding-block: 28px 40px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    overflow-x: hidden;
+  }
+  #stars { position: fixed; inset: 0; pointer-events: none; opacity: 0; }
+  #stars i { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #fff; }
+  @media (prefers-reduced-motion: no-preference) {
+    #stars i:nth-child(3n) { animation: tw 3.4s ease-in-out infinite; }
+    #stars i:nth-child(5n) { animation-delay: 1.3s; }
+    .dial.done .digits { animation: pulse 0.7s ease-in-out infinite alternate; }
+  }
+  @keyframes tw { 50% { opacity: 0.25; } }
+  @keyframes pulse { to { opacity: 0.25; } }
+
+  main { position: relative; max-width: 620px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; min-width: 0; }
+  .zone { font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+
+  button {
+    font: inherit; color: var(--fg); cursor: pointer;
+    background: var(--glass); border: 1px solid var(--glass-line); border-radius: 999px;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:disabled { opacity: 0.45; cursor: default; border-color: var(--glass-line); }
+  #fmt { font-size: 13px; padding: 7px 14px; }
+
+  .modes { display: flex; gap: 6px; padding: 4px; border-radius: 999px; background: var(--glass); border: 1px solid var(--glass-line); align-self: center; }
+  .modes button { border: 0; background: transparent; font-size: 13px; padding: 7px 16px; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .modes button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.22); font-weight: 600; }
+
+  .dial { position: relative; width: 100%; aspect-ratio: 1; container-type: inline-size; }
+  .dial svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .track { fill: none; stroke: var(--track); }
+  .arc { fill: none; stroke-linecap: round; }
+  .arc.s { stroke: var(--accent); stroke-width: 4; filter: drop-shadow(0 0 6px var(--accent)); }
+  .arc.m { stroke: var(--ring); stroke-width: 6; opacity: 0.92; }
+  .arc.h { stroke: var(--ring); stroke-width: 9; opacity: 0.55; }
+  .daytick { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1; }
+
+  .center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.6cqw; }
+  .digits { display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 200; font-size: 12.5cqw; line-height: 1; --u: 1.12em; }
+  .dial.done .digits { color: var(--accent); }
+  .col { width: 0.62em; height: var(--u); overflow: hidden; }
+  .strip { transition: transform 0.75s cubic-bezier(0.3, 2.1, 0.45, 1); transform: translateY(calc(var(--i, 0) * var(--u) * -1)); }
+  .strip span { display: flex; align-items: center; justify-content: center; height: var(--u); }
+  .colon { width: 0.3em; text-align: center; opacity: 0.55; padding-bottom: 0.08em; }
+  .phase { font-size: clamp(11px, 2.6cqw, 14px); letter-spacing: 0.28em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  .date { font-size: clamp(13px, 3.3cqw, 18px); color: var(--muted); }
+
+  .controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .controls button { font-size: 15px; padding: 10px 24px; min-width: 96px; }
+  #go { background: var(--accent); border-color: var(--accent); color: #1c1226; font-weight: 600; }
+  .presets { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .presets button { font-size: 13px; padding: 7px 14px; }
+  .laps { list-style: none; margin: 0; padding: 0; max-height: 190px; overflow-y: auto; border-top: 1px solid var(--glass-line); }
+  .laps li { display: grid; grid-template-columns: 4.5em 1fr auto; gap: 12px; padding: 9px 4px; border-bottom: 1px solid var(--glass-line); font-size: 14px; font-variant-numeric: tabular-nums; }
+  .laps .tot { color: var(--muted); text-align: right; }
+  .hint { font-size: 12px; color: var(--muted); text-align: center; }
+
+  .cities { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .cities button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; border-radius: 14px; padding: 10px 14px; text-align: left; min-width: 0; }
+  .cities .n { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .cities .t { font-family: var(--font-display); font-weight: 300; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .cities .t em { font-style: normal; font-size: 12px; color: var(--accent); margin-left: 4px; }
+  .cities button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.2); border-color: var(--accent); }
+  .cities button[aria-pressed="true"] .n { color: var(--fg); }
+</style>
+
+<div id="stars" aria-hidden="true"></div>
+<main>
+  <div class="modes" role="group" aria-label="Mode">
+    <button type="button" data-mode="clock" aria-pressed="true">Clock</button>
+    <button type="button" data-mode="stopwatch" aria-pressed="false">Stopwatch</button>
+    <button type="button" data-mode="timer" aria-pressed="false">Timer</button>
+  </div>
+
+  <div class="bar">
+    <span class="zone" id="zone"></span>
+    <button id="fmt" type="button" aria-label="Switch between 12 and 24 hour time">24-hour</button>
+  </div>
+
+  <div class="dial" id="dial" role="img" aria-label="Clock">
+    <svg viewBox="0 0 400 400">
+      <g id="daytick"></g>
+      <circle class="track" cx="200" cy="200" r="188" stroke-width="1.5"/>
+      <circle class="track" cx="200" cy="200" r="166" stroke-width="4"/>
+      <circle class="track" cx="200" cy="200" r="146" stroke-width="6"/>
+      <circle class="track" cx="200" cy="200" r="124" stroke-width="9"/>
+      <circle class="arc s" id="as" cx="200" cy="200" r="166" transform="rotate(-90 200 200)"/>
+      <circle class="arc m" id="am" cx="200" cy="200" r="146" transform="rotate(-90 200 200)"/>
+      <circle class="arc h" id="ah" cx="200" cy="200" r="124" transform="rotate(-90 200 200)"/>
+    </svg>
+    <div class="center">
+      <div class="digits" id="digits"></div>
+      <div class="phase" id="phase"></div>
+      <div class="date" id="date"></div>
+    </div>
+  </div>
+
+  <div class="presets" id="presets" hidden>
+    <button type="button" data-add="-60000" aria-label="Subtract one minute">&minus;1 min</button>
+    <button type="button" data-set="1">1m</button>
+    <button type="button" data-set="5">5m</button>
+    <button type="button" data-set="10">10m</button>
+    <button type="button" data-set="25">25m</button>
+    <button type="button" data-add="60000" aria-label="Add one minute">+1 min</button>
+  </div>
+
+  <div class="controls" id="controls" hidden>
+    <button type="button" id="go">Start</button>
+    <button type="button" id="lap" disabled>Lap</button>
+    <button type="button" id="reset">Reset</button>
+  </div>
+  <div class="hint" id="hint" hidden>Space starts and pauses &middot; L laps &middot; R resets</div>
+
+  <ol class="laps" id="laps" hidden></ol>
+
+  <div class="cities" id="cities"></div>
+</main>
+
+<script>
+(function () {
+  var NS = "http://www.w3.org/2000/svg";
+  var localTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  var cities = [
+    { name: "Local", tz: localTz },
+    { name: "New York", tz: "America/New_York" },
+    { name: "London", tz: "Europe/London" },
+    { name: "Kolkata", tz: "Asia/Kolkata" },
+    { name: "Tokyo", tz: "Asia/Tokyo" },
+    { name: "Sydney", tz: "Australia/Sydney" }
+  ];
+  var selected = 0, use24 = false, mode = "clock";
+  var sw = { run: false, start: 0, acc: 0, laps: [] };
+  var tm = { run: false, start: 0, acc: 0, dur: 300000, done: false };
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function $(id) { return document.getElementById(id); }
+  function two(n) { return (n < 10 ? "0" : "") + n; }
+  function elapsed(o) { return o.acc + (o.run ? Date.now() - o.start : 0); }
+
+  /* stars */
+  var stars = $("stars");
+  for (var i = 0; i < 80; i++) {
+    var st = document.createElement("i");
+    st.style.left = Math.random() * 100 + "%";
+    st.style.top = Math.random() * 100 + "%";
+    st.style.opacity = (0.35 + Math.random() * 0.65).toFixed(2);
+    if (Math.random() < 0.15) { st.style.width = st.style.height = "3px"; }
+    stars.appendChild(st);
+  }
+
+  /* 12 ticks on the outer ring */
+  var dt = $("daytick");
+  for (var k = 0; k < 12; k++) {
+    var l = document.createElementNS(NS, "line");
+    l.setAttribute("class", "daytick");
+    l.setAttribute("x1", 200); l.setAttribute("x2", 200);
+    l.setAttribute("y1", k % 3 === 0 ? 2 : 5); l.setAttribute("y2", 9);
+    l.setAttribute("transform", "rotate(" + k * 30 + " 200 200)");
+    dt.appendChild(l);
+  }
+
+  /* rolling digit columns */
+  function Col(parent) {
+    this.el = document.createElement("div"); this.el.className = "col";
+    this.strip = document.createElement("div"); this.strip.className = "strip";
+    for (var n = 0; n <= 10; n++) {
+      var sp = document.createElement("span"); sp.textContent = n % 10; this.strip.appendChild(sp);
+    }
+    this.el.appendChild(this.strip);
+    parent.appendChild(this.el);
+    this.cur = null; this.idx = 0; this.timer = null;
+  }
+  Col.prototype.place = function (v) {
+    this.strip.style.transition = "none";
+    this.strip.style.setProperty("--i", v);
+    void this.strip.offsetWidth;
+    this.strip.style.transition = "";
+    this.idx = v;
+  };
+  Col.prototype.set = function (v, down) {
+    if (v === this.cur) return;
+    var self = this;
+    clearTimeout(this.timer);
+    if (this.idx === 10) this.place(0);
+    if (this.cur === null || reduce) { this.place(v); }
+    else if (down) {
+      if (v > this.cur) this.place(10);
+      this.strip.style.setProperty("--i", v); this.idx = v;
+    } else if (v > this.cur) { this.strip.style.setProperty("--i", v); this.idx = v; }
+    else if (v === 0) {
+      this.strip.style.setProperty("--i", 10); this.idx = 10;
+      this.timer = setTimeout(function () { self.place(0); }, 850);
+    } else { this.place(v); }
+    this.cur = v;
+  };
+
+  var digitsEl = $("digits");
+  var cols = [];
+  function addColon() { var c = document.createElement("div"); c.className = "colon"; c.textContent = ":"; digitsEl.appendChild(c); }
+  cols.push(new Col(digitsEl), new Col(digitsEl)); addColon();
+  cols.push(new Col(digitsEl), new Col(digitsEl)); addColon();
+  cols.push(new Col(digitsEl), new Col(digitsEl));
+
+  /* time helpers */
+  var fmtCache = {}, dateCache = {};
+  function parts(tz, d) {
+    var f = fmtCache[tz] || (fmtCache[tz] = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric",
+      hour: "numeric", minute: "numeric", second: "numeric"
+    }));
+    var o = {};
+    f.formatToParts(d).forEach(function (p) { o[p.type] = +p.value; });
+    o.h = o.hour % 24; o.m = o.minute; o.s = o.second;
+    o.key = o.year * 10000 + o.month * 100 + o.day;
+    return o;
+  }
+  function dateText(tz, d) {
+    var f = dateCache[tz] || (dateCache[tz] = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long", month: "long", day: "numeric" }));
+    return f.format(d);
+  }
+  function clockText(p) {
+    if (use24) return two(p.h) + ":" + two(p.m);
+    return (p.h % 12 || 12) + ":" + two(p.m) + " " + (p.h < 12 ? "AM" : "PM");
+  }
+  function stopText(ms) {
+    var h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60, c = Math.floor((ms % 1000) / 10);
+    return (h ? h + ":" : "") + two(m) + ":" + two(s) + "." + two(c);
+  }
+
+  /* sky: [hour, top, bottom] */
+  var SKY = [
+    [0, [7, 11, 31], [26, 20, 64]],
+    [5, [27, 27, 75], [107, 58, 110]],
+    [6.5, [59, 63, 143], [240, 138, 93]],
+    [9, [31, 95, 184], [90, 163, 224]],
+    [13, [29, 92, 181], [79, 154, 216]],
+    [17, [43, 76, 155], [242, 166, 90]],
+    [19, [58, 42, 120], [217, 80, 122]],
+    [21, [18, 18, 54], [42, 31, 92]],
+    [24, [7, 11, 31], [26, 20, 64]]
+  ];
+  function mix(a, b, t) { return [0, 1, 2].map(function (i) { return Math.round(a[i] + (b[i] - a[i]) * t); }); }
+  function rgb(c) { return "rgb(" + c.join(",") + ")"; }
+  function sky(hf) {
+    for (var i = 1; i < SKY.length; i++) {
+      if (hf <= SKY[i][0]) {
+        var a = SKY[i - 1], b = SKY[i], t = (hf - a[0]) / (b[0] - a[0]);
+        return [mix(a[1], b[1], t), mix(a[2], b[2], t)];
+      }
+    }
+    return [SKY[0][1], SKY[0][2]];
+  }
+  function phaseName(hf) {
+    if (hf < 5) return "Night";
+    if (hf < 7.5) return "Dawn";
+    if (hf < 11.5) return "Morning";
+    if (hf < 13.5) return "Midday";
+    if (hf < 17) return "Afternoon";
+    if (hf < 19) return "Evening";
+    if (hf < 21) return "Dusk";
+    return "Night";
+  }
+
+  /* sound for the timer */
+  var actx = null;
+  function audioReady() {
+    try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === "suspended") actx.resume(); } catch (e) {}
+  }
+  function beep() {
+    try {
+      audioReady();
+      if (!actx) return;
+      [0, 0.28, 0.56].forEach(function (t) {
+        var o = actx.createOscillator(), g = actx.createGain(), at = actx.currentTime + t;
+        o.frequency.value = 880;
+        g.gain.setValueAtTime(0.0001, at);
+        g.gain.exponentialRampToValueAtTime(0.25, at + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, at + 0.22);
+        o.connect(g); g.connect(actx.destination);
+        o.start(at); o.stop(at + 0.24);
+      });
+    } catch (e) {}
+  }
+
+  /* city tiles */
+  var citiesEl = $("cities"), rows = [];
+  cities.forEach(function (c, idx) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.innerHTML = '<span class="n"></span><span class="t"></span>';
+    b.querySelector(".n").textContent = c.name === "Local" ? "Local · " + localTz.split("/").pop().replace(/_/g, " ") : c.name;
+    b.addEventListener("click", function () { selected = idx; update(true); });
+    citiesEl.appendChild(b);
+    rows.push({ b: b, t: b.querySelector(".t") });
+  });
+
+  var fmtBtn = $("fmt");
+  fmtBtn.addEventListener("click", function () {
+    use24 = !use24;
+    fmtBtn.textContent = use24 ? "12-hour" : "24-hour";
+    update(true);
+  });
+
+  /* stopwatch and timer controls */
+  var goBtn = $("go"), lapBtn = $("lap"), resetBtn = $("reset"), lapsEl = $("laps");
+  function cur() { return mode === "stopwatch" ? sw : tm; }
+
+  function renderLaps() {
+    lapsEl.innerHTML = "";
+    sw.laps.slice(0, 50).forEach(function (t, i) {
+      var li = document.createElement("li");
+      var split = t - (sw.laps[i + 1] || 0);
+      li.innerHTML = "<span>Lap " + (sw.laps.length - i) + "</span><span>" + stopText(split) + '</span><span class="tot">' + stopText(t) + "</span>";
+      lapsEl.appendChild(li);
+    });
+  }
+
+  function syncUI() {
+    document.querySelectorAll(".modes button").forEach(function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-mode") === mode ? "true" : "false");
+    });
+    var clock = mode === "clock";
+    fmtBtn.hidden = !clock;
+    citiesEl.hidden = !clock;
+    $("controls").hidden = clock;
+    $("hint").hidden = clock;
+    $("presets").hidden = mode !== "timer";
+    lapBtn.hidden = mode !== "stopwatch";
+    lapsEl.hidden = !(mode === "stopwatch" && sw.laps.length);
+    if (!clock) {
+      var o = cur();
+      goBtn.textContent = o.run ? "Pause" : (mode === "timer" && tm.done ? "Restart" : (o.acc > 0 ? "Resume" : "Start"));
+      lapBtn.disabled = !(mode === "stopwatch" && sw.run);
+    }
+    $("dial").classList.toggle("done", mode === "timer" && tm.done);
+    $("dial").setAttribute("aria-label", clock ? "Clock" : (mode === "timer" ? "Countdown timer" : "Stopwatch"));
+  }
+
+  function setMode(m) { mode = m; lastSec = -1; syncUI(); update(true); }
+  document.querySelectorAll(".modes button").forEach(function (b) {
+    b.addEventListener("click", function () { setMode(b.getAttribute("data-mode")); });
+  });
+
+  function resetCur() {
+    var o = cur();
+    o.run = false; o.acc = 0;
+    if (mode === "timer") tm.done = false; else { sw.laps = []; renderLaps(); }
+    syncUI(); update(true);
+  }
+  function toggleGo() {
+    audioReady();
+    var o = cur();
+    if (mode === "timer" && (tm.done || tm.dur - elapsed(tm) <= 0)) { tm.run = false; tm.acc = 0; tm.done = false; }
+    if (o.run) { o.acc += Date.now() - o.start; o.run = false; }
+    else { o.start = Date.now(); o.run = true; }
+    syncUI(); update(true);
+  }
+  function doLap() {
+    if (mode !== "stopwatch" || !sw.run) return;
+    sw.laps.unshift(elapsed(sw));
+    renderLaps(); syncUI();
+  }
+  goBtn.addEventListener("click", toggleGo);
+  lapBtn.addEventListener("click", doLap);
+  resetBtn.addEventListener("click", resetCur);
+
+  document.querySelectorAll(".presets button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var add = b.getAttribute("data-add"), set = b.getAttribute("data-set");
+      if (tm.done) { tm.done = false; tm.acc = 0; tm.run = false; }
+      if (set) { tm.dur = +set * 60000; tm.acc = 0; tm.run = false; }
+      else { tm.dur = Math.max(60000, Math.min(99 * 3600000, tm.dur + (+add))); }
+      syncUI(); update(true);
+    });
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (mode === "clock" || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.code === "Space" && e.target.tagName !== "BUTTON") { e.preventDefault(); toggleGo(); }
+    else if (e.code === "KeyL") doLap();
+    else if (e.code === "KeyR") resetCur();
+  });
+
+  var C = { s: 2 * Math.PI * 166, m: 2 * Math.PI * 146, h: 2 * Math.PI * 124 };
+  var as = $("as"), am = $("am"), ah = $("ah"), root = document.documentElement;
+  var phaseEl = $("phase"), dateEl = $("date"), zoneEl = $("zone");
+  var lastSec = -1;
+
+  function arc(el, len, frac) { el.setAttribute("stroke-dasharray", (frac * len).toFixed(2) + " " + len.toFixed(2)); }
+
+  function update(force) {
+    var now = new Date(), tz = cities[selected].tz;
+    var cp = parts(tz, now), p = cp, down = false;
+    var ms = reduce ? 0 : now.getMilliseconds();
+
+    if (mode !== "clock") {
+      var total;
+      if (mode === "stopwatch") { total = elapsed(sw); }
+      else {
+        total = Math.max(0, tm.dur - elapsed(tm));
+        if (tm.run && total === 0) { tm.run = false; tm.acc = tm.dur; tm.done = true; beep(); syncUI(); force = true; }
+        down = true;
+      }
+      ms = reduce ? 0 : total % 1000;
+      p = { h: Math.floor(total / 3600000) % 100, m: Math.floor(total / 60000) % 60, s: Math.floor(total / 1000) % 60 };
+    }
+
+    arc(as, C.s, (p.s + ms / 1000) / 60);
+    arc(am, C.m, (p.m + p.s / 60) / 60);
+    arc(ah, C.h, ((p.h % 12) + p.m / 60) / 12);
+
+    if (p.s === lastSec && !force) return;
+    lastSec = p.s;
+
+    var clock = mode === "clock";
+    var h = clock ? (use24 ? p.h : (p.h % 12 || 12)) : p.h;
+    cols[0].el.style.display = (clock && !use24 && h < 10) ? "none" : "";
+    cols[0].set(Math.floor(h / 10), down); cols[1].set(h % 10, down);
+    cols[2].set(Math.floor(p.m / 10), down); cols[3].set(p.m % 10, down);
+    cols[4].set(Math.floor(p.s / 10), down); cols[5].set(p.s % 10, down);
+
+    var hf = cp.h + cp.m / 60 + cp.s / 3600;
+    if (clock) {
+      phaseEl.textContent = (use24 ? "" : (cp.h < 12 ? "AM · " : "PM · ")) + phaseName(hf);
+      dateEl.textContent = dateText(tz, now);
+      zoneEl.textContent = cities[selected].name === "Local" ? "Local time" : cities[selected].name + " time";
+    } else {
+      var o = cur();
+      phaseEl.textContent = mode === "timer" ? "Timer" : "Stopwatch";
+      dateEl.textContent = mode === "timer"
+        ? (tm.done ? "Time’s up" : (tm.run ? "Counting down" : (tm.acc > 0 ? "Paused" : "Ready")))
+        : (o.run ? "Running" : (o.acc > 0 ? "Paused" : "Ready"));
+      zoneEl.textContent = mode === "timer" ? "Countdown timer" : "Stopwatch";
+    }
+
+    var cs = sky(hf);
+    root.style.setProperty("--sky-top", rgb(cs[0]));
+    root.style.setProperty("--sky-bot", rgb(cs[1]));
+    var f = (1 - Math.cos((2 * Math.PI * hf) / 24)) / 2;
+    stars.style.opacity = Math.max(0, Math.min(1, (0.4 - f) / 0.15)).toFixed(2);
+
+    var localKey = parts(localTz, now).key;
+    cities.forEach(function (city, i) {
+      var q = parts(city.tz, now);
+      var diff = q.key > localKey ? "+1d" : q.key < localKey ? "−1d" : "";
+      rows[i].t.innerHTML = clockText(q) + (diff ? "<em>" + diff + "</em>" : "");
+      rows[i].b.setAttribute("aria-pressed", i === selected ? "true" : "false");
+    });
+  }
+
+  function frame() { update(false); requestAnimationFrame(frame); }
+  syncUI();
+  update(true);
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body></html>
