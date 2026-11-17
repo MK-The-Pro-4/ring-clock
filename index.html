@@ -1,6 +1,9 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Ring Clock</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Sora:wght@200;300;600&display=swap">
 <style>
   /* Layout: mode switch on top, one centered dial of concentric rings around rolling digits, over a sky that
@@ -80,8 +83,14 @@
   .controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
   .controls button { font-size: 15px; padding: 10px 24px; min-width: 96px; }
   #go { background: var(--accent); border-color: var(--accent); color: #1c1226; font-weight: 600; }
-  .presets { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-  .presets button { font-size: 13px; padding: 7px 14px; }
+  .editor { display: flex; flex-direction: column; align-items: center; gap: 2.4cqw; }
+  .fields { display: flex; align-items: flex-start; gap: 2cqw; }
+  .fields label { display: flex; flex-direction: column; align-items: center; gap: 1cqw; font-size: clamp(10px, 2.4cqw, 13px); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+  .fields input { font: 200 9cqw var(--font-display); width: 1.7em; text-align: center; color: var(--fg); background: var(--glass); border: 1px solid var(--glass-line); border-radius: 12px; padding: 0.1em 0; }
+  .fields input:focus { outline: 2px solid var(--accent); }
+  .ebtns { display: flex; gap: 8px; }
+  .ebtns button { font-size: 13px; padding: 7px 18px; }
+  .ebtns .primary { background: var(--accent); border-color: var(--accent); color: #1c1226; font-weight: 600; }
   .laps { list-style: none; margin: 0; padding: 0; max-height: 190px; overflow-y: auto; border-top: 1px solid var(--glass-line); }
   .laps li { display: grid; grid-template-columns: 4.5em 1fr auto; gap: 12px; padding: 9px 4px; border-bottom: 1px solid var(--glass-line); font-size: 14px; font-variant-numeric: tabular-nums; }
   .laps .tot { color: var(--muted); text-align: right; }
@@ -94,8 +103,12 @@
   .cities .t em { font-style: normal; font-size: 12px; color: var(--accent); margin-left: 4px; }
   .cities button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.2); border-color: var(--accent); }
   .cities button[aria-pressed="true"] .n { color: var(--fg); }
+  .dial { transition: transform 0.15s ease-out; will-change: transform; }
 </style>
 
+<style>html, body { margin: 0; }</style>
+</head>
+<body>
 <div id="stars" aria-hidden="true"></div>
 <main>
   <div class="modes" role="group" aria-label="Mode">
@@ -122,18 +135,20 @@
     </svg>
     <div class="center">
       <div class="digits" id="digits"></div>
+      <form class="editor" id="editor" hidden autocomplete="off">
+        <div class="fields">
+          <label>Hours<input id="eh" inputmode="numeric" maxlength="2" aria-label="Hours"></label>
+          <label>Min<input id="em" inputmode="numeric" maxlength="2" aria-label="Minutes"></label>
+          <label>Sec<input id="es" inputmode="numeric" maxlength="2" aria-label="Seconds"></label>
+        </div>
+        <div class="ebtns">
+          <button type="submit" class="primary">Set</button>
+          <button type="button" id="ecancel">Cancel</button>
+        </div>
+      </form>
       <div class="phase" id="phase"></div>
       <div class="date" id="date"></div>
     </div>
-  </div>
-
-  <div class="presets" id="presets" hidden>
-    <button type="button" data-add="-60000" aria-label="Subtract one minute">&minus;1 min</button>
-    <button type="button" data-set="1">1m</button>
-    <button type="button" data-set="5">5m</button>
-    <button type="button" data-set="10">10m</button>
-    <button type="button" data-set="25">25m</button>
-    <button type="button" data-add="60000" aria-label="Add one minute">+1 min</button>
   </div>
 
   <div class="controls" id="controls" hidden>
@@ -142,6 +157,8 @@
     <button type="button" id="reset">Reset</button>
   </div>
   <div class="hint" id="hint" hidden>Space starts and pauses &middot; L laps &middot; R resets</div>
+
+  <div class="hint" id="thint" hidden>Double-click the time to set hours, minutes and seconds (up to 24:00:00)</div>
 
   <ol class="laps" id="laps" hidden></ol>
 
@@ -182,12 +199,12 @@
 
   /* 12 ticks on the outer ring */
   var dt = $("daytick");
-  for (var k = 0; k < 12; k++) {
+  for (var k = 0; k < 60; k++) {
     var l = document.createElementNS(NS, "line");
     l.setAttribute("class", "daytick");
     l.setAttribute("x1", 200); l.setAttribute("x2", 200);
-    l.setAttribute("y1", k % 3 === 0 ? 2 : 5); l.setAttribute("y2", 9);
-    l.setAttribute("transform", "rotate(" + k * 30 + " 200 200)");
+    l.setAttribute("y1", k % 5 === 0 ? 2 : 5); l.setAttribute("y2", 9);
+    l.setAttribute("transform", "rotate(" + k * 6 + " 200 200)");
     dt.appendChild(l);
   }
 
@@ -304,15 +321,19 @@
       if (!actx) return;
       [0, 0.28, 0.56].forEach(function (t) {
         var o = actx.createOscillator(), g = actx.createGain(), at = actx.currentTime + t;
-        o.frequency.value = 880;
+        o.type = "square"; o.frequency.value = 880;
         g.gain.setValueAtTime(0.0001, at);
-        g.gain.exponentialRampToValueAtTime(0.25, at + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.5, at + 0.02);
         g.gain.exponentialRampToValueAtTime(0.0001, at + 0.22);
         o.connect(g); g.connect(actx.destination);
         o.start(at); o.stop(at + 0.24);
       });
     } catch (e) {}
   }
+
+  var alarmId = null;
+  function startAlarm() { if (alarmId) return; beep(); alarmId = setInterval(beep, 1300); }
+  function stopAlarm() { if (alarmId) { clearInterval(alarmId); alarmId = null; } }
 
   /* city tiles */
   var citiesEl = $("cities"), rows = [];
@@ -356,24 +377,25 @@
     citiesEl.hidden = !clock;
     $("controls").hidden = clock;
     $("hint").hidden = clock;
-    $("presets").hidden = mode !== "timer";
+    $("thint").hidden = mode !== "timer";
     lapBtn.hidden = mode !== "stopwatch";
     lapsEl.hidden = !(mode === "stopwatch" && sw.laps.length);
     if (!clock) {
       var o = cur();
-      goBtn.textContent = o.run ? "Pause" : (mode === "timer" && tm.done ? "Restart" : (o.acc > 0 ? "Resume" : "Start"));
+      goBtn.textContent = o.run ? "Pause" : (mode === "timer" && tm.done ? (alarmId ? "Stop" : "Restart") : (o.acc > 0 ? "Resume" : "Start"));
       lapBtn.disabled = !(mode === "stopwatch" && sw.run);
     }
     $("dial").classList.toggle("done", mode === "timer" && tm.done);
     $("dial").setAttribute("aria-label", clock ? "Clock" : (mode === "timer" ? "Countdown timer" : "Stopwatch"));
   }
 
-  function setMode(m) { mode = m; lastSec = -1; syncUI(); update(true); }
+  function setMode(m) { mode = m; lastSec = -1; if (m !== "timer") { stopAlarm(); closeEditor(); } syncUI(); update(true); }
   document.querySelectorAll(".modes button").forEach(function (b) {
     b.addEventListener("click", function () { setMode(b.getAttribute("data-mode")); });
   });
 
   function resetCur() {
+    stopAlarm();
     var o = cur();
     o.run = false; o.acc = 0;
     if (mode === "timer") tm.done = false; else { sw.laps = []; renderLaps(); }
@@ -381,6 +403,8 @@
   }
   function toggleGo() {
     audioReady();
+    closeEditor();
+    if (mode === "timer" && alarmId) { stopAlarm(); tm.run = false; tm.acc = 0; tm.done = false; syncUI(); update(true); return; }
     var o = cur();
     if (mode === "timer" && (tm.done || tm.dur - elapsed(tm) <= 0)) { tm.run = false; tm.acc = 0; tm.done = false; }
     if (o.run) { o.acc += Date.now() - o.start; o.run = false; }
@@ -396,22 +420,52 @@
   lapBtn.addEventListener("click", doLap);
   resetBtn.addEventListener("click", resetCur);
 
-  document.querySelectorAll(".presets button").forEach(function (b) {
-    b.addEventListener("click", function () {
-      var add = b.getAttribute("data-add"), set = b.getAttribute("data-set");
-      if (tm.done) { tm.done = false; tm.acc = 0; tm.run = false; }
-      if (set) { tm.dur = +set * 60000; tm.acc = 0; tm.run = false; }
-      else { tm.dur = Math.max(60000, Math.min(99 * 3600000, tm.dur + (+add))); }
-      syncUI(); update(true);
-    });
+  /* custom time editor (double-click the timer digits) */
+  var editor = $("editor"), ef = { h: $("eh"), m: $("em"), s: $("es") };
+  function closeEditor() { editor.hidden = true; digitsEl.hidden = false; }
+  function openEditor() {
+    if (mode !== "timer" || tm.run || alarmId) return;
+    var rem = Math.max(0, tm.dur - elapsed(tm));
+    ef.h.value = two(Math.floor(rem / 3600000));
+    ef.m.value = two(Math.floor(rem / 60000) % 60);
+    ef.s.value = two(Math.floor(rem / 1000) % 60);
+    digitsEl.hidden = true; editor.hidden = false;
+    ef.h.focus(); ef.h.select();
+  }
+  function num(inp, max) { var n = parseInt(inp.value, 10); return isNaN(n) ? 0 : Math.max(0, Math.min(max, n)); }
+  digitsEl.addEventListener("dblclick", openEditor);
+  editor.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var total = ((num(ef.h, 24) * 60 + num(ef.m, 59)) * 60 + num(ef.s, 59)) * 1000;
+    tm.dur = Math.max(1000, Math.min(24 * 3600000, total));
+    tm.acc = 0; tm.run = false; tm.done = false;
+    closeEditor(); syncUI(); update(true);
+  });
+  $("ecancel").addEventListener("click", closeEditor);
+  editor.addEventListener("keydown", function (e) { if (e.key === "Escape") closeEditor(); });
+  [ef.h, ef.m, ef.s].forEach(function (inp) {
+    inp.addEventListener("focus", function () { inp.select(); });
+    inp.addEventListener("input", function () { inp.value = inp.value.replace(/\D/g, "").slice(0, 2); });
   });
 
   document.addEventListener("keydown", function (e) {
-    if (mode === "clock" || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (mode === "clock" || e.metaKey || e.ctrlKey || e.altKey || e.target.tagName === "INPUT") return;
     if (e.code === "Space" && e.target.tagName !== "BUTTON") { e.preventDefault(); toggleGo(); }
     else if (e.code === "KeyL") doLap();
     else if (e.code === "KeyR") resetCur();
   });
+
+  var dialEl = $("dial");
+
+  /* tilt toward the pointer */
+  if (!reduce) {
+    document.addEventListener("pointermove", function (e) {
+      var r = dialEl.getBoundingClientRect();
+      var dx = (e.clientX - (r.left + r.width / 2)) / window.innerWidth;
+      var dy = (e.clientY - (r.top + r.height / 2)) / window.innerHeight;
+      dialEl.style.transform = "perspective(900px) rotateY(" + (dx * 14).toFixed(2) + "deg) rotateX(" + (-dy * 14).toFixed(2) + "deg)";
+    });
+  }
 
   var C = { s: 2 * Math.PI * 166, m: 2 * Math.PI * 146, h: 2 * Math.PI * 124 };
   var as = $("as"), am = $("am"), ah = $("ah"), root = document.documentElement;
@@ -430,7 +484,7 @@
       if (mode === "stopwatch") { total = elapsed(sw); }
       else {
         total = Math.max(0, tm.dur - elapsed(tm));
-        if (tm.run && total === 0) { tm.run = false; tm.acc = tm.dur; tm.done = true; beep(); syncUI(); force = true; }
+        if (tm.run && total === 0) { tm.run = false; tm.acc = tm.dur; tm.done = true; startAlarm(); syncUI(); force = true; }
         down = true;
       }
       ms = reduce ? 0 : total % 1000;
@@ -486,5 +540,5 @@
   requestAnimationFrame(frame);
 })();
 </script>
-
-</body></html>
+</body>
+</html>
